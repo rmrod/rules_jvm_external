@@ -7,6 +7,10 @@ java_binary(
     visibility = ["//visibility:public"],
     deps = [
         "//private/tools/java/rules/jvm/external:byte-streams",
+       artifact(
+            "com.amazonaws:aws-java-sdk-s3",
+            repository_name = "rules_jvm_external_deps",
+        ),
         artifact(
             "com.google.cloud:google-cloud-storage",
             repository_name = "rules_jvm_external_deps",

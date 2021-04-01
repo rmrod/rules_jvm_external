@@ -17,6 +17,9 @@
 
 package rules.jvm.external.maven;
 
+import com.amazonaws.services.s3.AmazonS3;
+import com.amazonaws.services.s3.AmazonS3ClientBuilder;
+import com.amazonaws.services.s3.model.PutObjectRequest;
 import com.google.cloud.WriteChannel;
 import com.google.cloud.storage.BlobInfo;
 import com.google.cloud.storage.Storage;
@@ -40,12 +43,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
 import java.util.logging.Logger;
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
@@ -56,13 +54,13 @@ public class MavenPublisher {
 
   private static final Logger LOG = Logger.getLogger(MavenPublisher.class.getName());
   private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(1);
-  private static final String[] SUPPORTED_SCHEMES = {"file:/", "https://", "gs://"};
+  private static final String[] SUPPORTED_SCHEMES = {"file:/", "https://", "gs://", "s3://"};
 
   public static void main(String[] args) throws IOException, InterruptedException, ExecutionException, TimeoutException {
     String repo = args[0];
     if (!isSchemeSupported(repo)) {
       throw new IllegalArgumentException("Repository must be accessed via the supported schemes: "
-              + Arrays.toString(SUPPORTED_SCHEMES));
+        + Arrays.toString(SUPPORTED_SCHEMES));
     }
 
     Credentials credentials = new Credentials(args[2], args[3], Boolean.parseBoolean(args[1]));
@@ -172,6 +170,8 @@ public class MavenPublisher {
       callable = httpUpload(targetUrl, credentials, toUpload);
     } else if (targetUrl.startsWith("gs://")) {
       callable = gcsUpload(targetUrl, toUpload);
+    } else if (targetUrl.startsWith("s3://")) {
+      callable = s3Upload(targetUrl, toUpload);
     } else {
       callable = writeFile(targetUrl, toUpload);
     }
@@ -248,9 +248,23 @@ public class MavenPublisher {
       LOG.info(String.format("Copying %s to gs://%s/%s", toUpload, bucketName, path));
       BlobInfo blobInfo = BlobInfo.newBuilder(bucketName, path).build();
       try (WriteChannel writer = storage.writer(blobInfo);
-            InputStream is = Files.newInputStream(toUpload)) {
+           InputStream is = Files.newInputStream(toUpload)) {
         ByteStreams.copy(is, Channels.newOutputStream(writer));
       }
+
+      return null;
+    };
+  }
+
+  private static Callable<Void> s3Upload(String targetUrl, Path toUpload) {
+    return () -> {
+      AmazonS3 s3Client = AmazonS3ClientBuilder.defaultClient();
+      URI s3Uri = new URI(targetUrl);
+      String bucketName = s3Uri.getHost();
+      String path = s3Uri.getPath().substring(1);
+
+      LOG.info(String.format("Copying %s to s3://%s/%s", toUpload, bucketName, path));
+      s3Client.putObject(new PutObjectRequest(bucketName, path, toUpload.toFile()));
 
       return null;
     };
@@ -266,10 +280,10 @@ public class MavenPublisher {
     Path file = dir.resolve(toSign.getFileName() + ".asc");
 
     Process gpg = new ProcessBuilder(
-        "gpg", "--use-agent", "--armor", "--detach-sign", "--no-tty",
-        "-o", file.toAbsolutePath().toString(), toSign.toAbsolutePath().toString())
-        .inheritIO()
-        .start();
+      "gpg", "--use-agent", "--armor", "--detach-sign", "--no-tty",
+      "-o", file.toAbsolutePath().toString(), toSign.toAbsolutePath().toString())
+      .inheritIO()
+      .start();
     gpg.waitFor();
     if (gpg.exitValue() != 0) {
       throw new IllegalStateException("Unable to sign: " + toSign);

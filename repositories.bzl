@@ -9,7 +9,8 @@ def rules_jvm_external_deps(repositories = _DEFAULT_REPOSITORIES):
     maven_install(
         name = "rules_jvm_external_deps",
         artifacts = [
-            "com.google.cloud:google-cloud-storage:1.113.4",
+            "com.amazonaws:aws-java-sdk-s3:1.11.989",
+            "com.google.cloud:google-cloud-storage:1.113.4"
         ],
         maven_install_json = "@rules_jvm_external//:rules_jvm_external_deps_install.json",
         fail_if_repin_required = True,
